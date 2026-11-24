@@ -1,0 +1,56 @@
+{
+  "trained_at": "2026-11-20T18:04:34+00:00",
+  "dataset": "ISOT Fake News Dataset",
+  "algorithm": "TF-IDF (1-2 grams) + Logistic Regression",
+  "n_train": 30793,
+  "n_test": 7699,
+  "n_features": 100000,
+  "accuracy": 0.9849331081958695,
+  "precision": 0.9914756025867137,
+  "recall": 0.9748554913294798,
+  "f1": 0.9830953074905275,
+  "confusion_matrix": [
+    [
+      4210,
+      29
+    ],
+    [
+      87,
+      3373
+    ]
+  ],
+  "top_real_terms": [
+    "president donald",
+    "wednesday",
+    "tuesday",
+    "thursday",
+    "republican",
+    "friday",
+    "said statement",
+    "monday",
+    "nov",
+    "minister",
+    "trump said",
+    "spokesman",
+    "president barack",
+    "democratic",
+    "said thursday"
+  ],
+  "top_fake_terms": [
+    "video",
+    "image",
+    "featured image",
+    "featured",
+    "just",
+    "read",
+    "gop",
+    "president trump",
+    "watch",
+    "obama",
+    "america",
+    "getty",
+    "hillary",
+    "getty images",
+    "breaking"
+  ]
+}
