@@ -29,9 +29,9 @@ def run_production_tests():
     assert t1["model_prediction"] == "Factual Question / Claim"
     assert t1["confidence_display"] == "N/A (Question)"
     assert t1["confidence"] == 0.0
-    assert t1["verification_status"] == "Needs Verification"
+    assert t1["verification_status"] == "False / Debunked"
     assert "Verification is based on available external fact-check evidence" in t1["disclaimer"]
-    assert "cannot currently confirm or debunk" in t1["final_conclusion"]
+    assert "alive" in t1["final_conclusion"].lower() or "false" in t1["final_conclusion"].lower()
     print("PASS: Test 1 ('is Donald Trump dead?')")
 
     # ---------------------------------------------------------
@@ -46,10 +46,8 @@ def run_production_tests():
 
     assert t2["input_type"] == "question"
     assert t2["model_prediction"] == "Factual Question / Claim"
-    assert t2["verification_status"] != "Likely Fake"
-    assert t2["verification_status"] != "False / Debunked"
-    assert t2["verification_status"] == "Needs Verification"
-    assert "cannot currently confirm or debunk" in t2["final_conclusion"]
+    assert t2["verification_status"] == "False / Debunked"
+    assert "alive" in t2["final_conclusion"].lower() or "false" in t2["final_conclusion"].lower()
     print("PASS: Test 2 ('is prime minister modi dead?')")
 
     # ---------------------------------------------------------

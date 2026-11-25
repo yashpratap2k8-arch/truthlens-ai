@@ -73,25 +73,57 @@ def run_upgrade_tests():
     print(f"Input Type: {s1.get('input_type')}")
     print(f"Verification Status: {s1.get('verification_status')}")
     print(f"Evidence Strength: {s1.get('evidence_strength')}")
+    print(f"Final Conclusion: {s1.get('final_conclusion')}")
     print(f"Evidence Items Count: {len(s1.get('evidence_items', []))}")
-    print(f"Evidence Provenance: {s1.get('evidence_provenance')}")
     assert s1["input_type"] == "question"
-    assert s1["verification_status"] in ("Needs Verification", "False / Debunked", "Partially True")
-    # Verify evidence items structure and provenance tracking
+    assert s1["verification_status"] == "False / Debunked"
+    assert "private" in s1["final_conclusion"].lower()
     assert "evidence_items" in s1
     assert "evidence_provenance" in s1
-    print("PASS: Scenario 1 (GLA University Inquiry)")
+    print("PASS: Scenario 1 (GLA University Inquiry -> False / Debunked: Private University)")
 
     # Scenario 2: "Is Donald Trump dead?"
     print("\n--- SCENARIO 2: 'Is Donald Trump dead?' ---")
     s2 = main.run_analysis("Is Donald Trump dead?", "text")
     print(f"Verification Status: {s2.get('verification_status')}")
     print(f"Final Conclusion: {s2.get('final_conclusion')}")
+    print(f"Evidence Strength: {s2.get('evidence_strength')}")
     assert s2["input_type"] == "question"
     assert s2["model_prediction"] == "Factual Question / Claim"
-    assert s2["verification_status"] == "Needs Verification"
-    assert "cannot currently confirm or debunk" in s2["final_conclusion"]
-    print("PASS: Scenario 2 (Living Figure Status Inquiry)")
+    assert s2["verification_status"] == "False / Debunked"
+    assert "alive" in s2["final_conclusion"].lower() or "false" in s2["final_conclusion"].lower()
+    assert s2["evidence_strength"] in ("Strong", "Moderate")
+    print("PASS: Scenario 2 (Living Figure Status Inquiry -> False / Debunked: Alive)")
+
+    # Scenario 2b: "Is Iron Man dead?"
+    print("\n--- SCENARIO 2b: 'Is Iron Man dead?' ---")
+    s2b = main.run_analysis("Is Iron Man dead?", "text")
+    print(f"Verification Status: {s2b.get('verification_status')}")
+    print(f"Final Conclusion: {s2b.get('final_conclusion')}")
+    assert s2b["input_type"] == "question"
+    assert s2b["verification_status"] == "Verified True"
+    assert "iron man" in s2b["final_conclusion"].lower() or "avengers" in s2b["final_conclusion"].lower()
+    print("PASS: Scenario 2b (Fictional Character Death -> Verified True: Avengers Endgame Canon)")
+
+    # Scenario 2c: "Is the Earth larger than the Moon?"
+    print("\n--- SCENARIO 2c: 'Is the Earth larger than the Moon?' ---")
+    s2c = main.run_analysis("Is the Earth larger than the Moon?", "text")
+    print(f"Verification Status: {s2c.get('verification_status')}")
+    print(f"Final Conclusion: {s2c.get('final_conclusion')}")
+    assert s2c["input_type"] == "question"
+    assert s2c["verification_status"] == "Verified True"
+    assert "larger" in s2c["final_conclusion"].lower() or "earth" in s2c["final_conclusion"].lower()
+    print("PASS: Scenario 2c (Factual Comparison -> Verified True)")
+
+    # Scenario 2d: "Did alien spaceships secretly land in Mathura yesterday?"
+    print("\n--- SCENARIO 2d: 'Did alien spaceships secretly land in Mathura yesterday?' ---")
+    s2d = main.run_analysis("Did alien spaceships secretly land in Mathura yesterday?", "text")
+    print(f"Verification Status: {s2d.get('verification_status')}")
+    print(f"Final Conclusion: {s2d.get('final_conclusion')}")
+    assert s2d["input_type"] == "question"
+    assert s2d["verification_status"] == "Needs Verification"
+    assert s2d["evidence_strength"] == "None"
+    print("PASS: Scenario 2d (Unverifiable Inquiry -> Needs Verification)")
 
     # Scenario 3: Known debunked misinformation claim
     print("\n--- SCENARIO 3: Known debunked misinformation claim ---")

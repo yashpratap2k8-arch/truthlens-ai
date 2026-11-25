@@ -281,6 +281,7 @@ def run_analysis(text, source_type, source_ref=None, title=None, user_id=None, e
     ai_assessment = ""
     missing_evidence_note = ""
     provenance_list = ["ML Writing Pattern Analysis"]
+    g_eval = None
 
     if input_type != "short_input":
         search_target = result.get("clean_query") or effective_title
@@ -336,6 +337,32 @@ def run_analysis(text, source_type, source_ref=None, title=None, user_id=None, e
         if p and p not in provenance_list:
             provenance_list.append(p)
 
+    # General Factual Question & Claim Evidence Evaluation
+    if input_type != "short_input":
+        v_status, v_reason, final_conclusion, ev_strength = evidence_retriever.evaluate_evidence_against_claim(
+            claim_text=text,
+            clean_query=result.get("clean_query") or effective_title,
+            input_type=input_type,
+            evidence_items=evidence_items,
+            gemini_eval=g_eval,
+        )
+        result["verification_status"] = v_status
+        result["verification_reason"] = v_reason
+        result["final_conclusion"] = final_conclusion
+        result["evidence_strength"] = ev_strength
+
+        if ev_strength != "None" and evidence_items:
+            result["external_evidence"] = f"{len(evidence_items)} matching authoritative report{'s' if len(evidence_items) != 1 else ''}"
+            if input_type == "question":
+                result["verification_notice"] = f"TruthLens verified this factual inquiry against authoritative records (Status: {v_status})."
+                result["verification_summary"] = f"Factual question inquiry resolved: {final_conclusion}"
+            else:
+                result["verification_notice"] = f"TruthLens verified external authoritative evidence addressing this claim (Status: {v_status})."
+                result["verification_summary"] = (
+                    f"Model predicts '{result['model_prediction']}' with {result['confidence_display']} confidence. "
+                    f"External authoritative evidence confirms status: {v_status}. {final_conclusion}"
+                )
+
     result.update(
         source_type=source_type,
         source_ref=source_ref,
@@ -348,7 +375,11 @@ def run_analysis(text, source_type, source_ref=None, title=None, user_id=None, e
         missing_evidence_note=missing_evidence_note,
         evidence_provenance=provenance_list,
         verification_status=result["verification_status"],
+        verification_reason=result["verification_reason"],
         verification_summary=result["verification_summary"],
+        final_conclusion=result["final_conclusion"],
+        evidence_strength=result["evidence_strength"],
+        external_evidence=result.get("external_evidence", "No reliable external evidence was found."),
         last_verified=now_iso,
         author=(extra_meta.get("author") if extra_meta else None),
         publication_date=(extra_meta.get("publication_date") if extra_meta else None),
