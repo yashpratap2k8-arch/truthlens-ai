@@ -15,6 +15,16 @@ export const setToken = (t) => {
   } catch {}
 }
 
+// Resolve API base URL: defaults to '/api' for Vite dev proxy and Vercel production rewrites.
+// Can be customized via VITE_API_BASE_URL (e.g., http://<LAPTOP_LAN_IP>:8000 for direct LAN testing).
+const rawBase = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '')
+const API_BASE = rawBase ? (rawBase.endsWith('/api') ? rawBase : `${rawBase}/api`) : '/api'
+
+function buildUrl(path) {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`
+  return `${API_BASE}${cleanPath}`
+}
+
 // Thin wrapper around fetch. Every function returns parsed JSON or throws Error(message).
 async function request(path, options = {}) {
   const token = getToken()
@@ -23,9 +33,10 @@ async function request(path, options = {}) {
     headers.set('Authorization', `Bearer ${token}`)
   }
 
+  const targetUrl = buildUrl(path)
   let res
   try {
-    res = await fetch('/api' + path, { ...options, headers })
+    res = await fetch(targetUrl, { ...options, headers })
   } catch {
     throw new Error('Cannot reach the server. Make sure the backend is running on port 8000.')
   }
@@ -76,5 +87,10 @@ export const api = {
   },
   ai: {
     chat: (message, context) => request('/ai/chat', json({ message, context })),
+  },
+  verification: {
+    claim: (claim, context) => request('/verification/claim', json({ claim, context })),
+    evidence: (query) => request('/verification/evidence', json({ query })),
+    details: (id) => request(`/verification/${id}`),
   },
 }

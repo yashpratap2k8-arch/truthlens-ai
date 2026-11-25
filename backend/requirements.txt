@@ -9,3 +9,5 @@ beautifulsoup4>=4.12
 python-dotenv
 google-auth>=2.28.0
 pyjwt>=2.8.0
+google-genai>=0.1.0
+supabase>=2.0.0

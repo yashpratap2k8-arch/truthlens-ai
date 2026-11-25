@@ -258,7 +258,7 @@ export default function History() {
                   <div className="text-left sm:text-right">
                     <VerdictBadge verdict={it.verdict} />
                     <span className="mt-1 block font-mono text-[11px] text-slate-500">
-                      {pct(it.confidence, 1)} confidence
+                      {it.confidence > 0 ? `${pct(it.confidence, 1)} confidence` : 'Pattern N/A'}
                     </span>
                   </div>
 

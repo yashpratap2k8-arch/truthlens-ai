@@ -218,7 +218,7 @@ export default function Dashboard() {
                         stroke="none"
                       >
                         {pieData.map((d) => (
-                          <Cell key={d.name} fill={VERDICTS[d.name].color} />
+                          <Cell key={d.name} fill={VERDICTS[d.name]?.color || '#f59e0b'} />
                         ))}
                       </Pie>
                       <Tooltip

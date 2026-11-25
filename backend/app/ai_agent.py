@@ -141,17 +141,32 @@ def _send_request(payload: dict, api_key: str) -> dict:
 
 def chat_with_ai(message: str, context: Optional[dict] = None) -> dict:
     """
-    Sends the user message and optional analysis context to OpenRouter using openrouter/free
-    with web search augmentation enabled.
-    Returns: {"success": True, "message": "..."} or {"success": False, "message": "..."}
+    Sends the user message and optional analysis context to the active AI Assistant.
+    Prioritizes Google Gemini with Google Search Grounding when GEMINI_API_KEY is present,
+    and cleanly falls back to OpenRouter.
+    Returns: {"success": True, "message": "...", "provider": "..."}
     """
+    # 1. Check Gemini Provider first
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if gemini_key:
+        try:
+            from . import gemini_agent
+            if gemini_agent.is_gemini_available():
+                g_res = gemini_agent.chat_with_gemini(message, context)
+                if g_res.get("success"):
+                    return g_res
+                log.info(f"Gemini chat failed ({g_res.get('message')}); falling back to OpenRouter...")
+        except Exception as e:
+            log.warning(f"Error attempting Gemini chat: {e}. Falling back to OpenRouter...")
+
+    # 2. OpenRouter Provider
     api_key = os.getenv("OPENROUTER_API_KEY")
 
     if not api_key:
-        log.warning("OPENROUTER_API_KEY is not set in the environment.")
+        log.warning("Neither GEMINI_API_KEY nor OPENROUTER_API_KEY is set in the environment.")
         return {
             "success": False,
-            "message": "AI Assistant is not configured on the server. Please check OPENROUTER_API_KEY.",
+            "message": "AI Assistant is not configured on the server. Please set GEMINI_API_KEY or OPENROUTER_API_KEY in backend/.env.",
         }
 
     context_text = ""
@@ -160,8 +175,12 @@ def chat_with_ai(message: str, context: Optional[dict] = None) -> dict:
         source_domain = context.get("source_domain") or context.get("source") or "Not specified"
         source_type = context.get("source_type") or "text"
         model_pred = context.get("model_prediction") or context.get("prediction") or "Uncertain"
-        confidence = context.get("confidence") or "Not specified"
+        raw_conf = context.get("confidence")
+        conf_display = context.get("confidence_display") or (f"{float(raw_conf)*100:.1f}%" if isinstance(raw_conf, (int, float)) and raw_conf <= 1.0 else str(raw_conf or "Not specified"))
         verif_status = context.get("verification_status") or "Needs Verification"
+        verif_reason = context.get("verification_reason") or ""
+        final_conclusion = context.get("final_conclusion") or ""
+        external_evidence = context.get("external_evidence") or ""
         verif_summary = context.get("verification_summary") or "Available evidence is insufficient for factual verification."
         indicators = context.get("indicators") or context.get("suspicious_flags") or []
         explanation = context.get("explanation") or "Not specified"
@@ -173,7 +192,7 @@ def chat_with_ai(message: str, context: Optional[dict] = None) -> dict:
         pub_date = context.get("publication_date")
         ext_check = context.get("external_fact_check")
 
-        ext_str = "No matching fact-check evidence was found in the available fact-check source."
+        ext_str = external_evidence or "No matching fact-check evidence was found in the available fact-check source."
         if isinstance(ext_check, dict):
             matches = ext_check.get("matches", [])
             if matches:
@@ -185,7 +204,7 @@ def chat_with_ai(message: str, context: Optional[dict] = None) -> dict:
                     revs_str = ", ".join(rev_list)
                     formatted_reviews.append(f'  - Claim: "{claim_text}" | Claimant: {claimant} | Reviews: {revs_str}')
                 ext_str = f"{len(matches)} published fact-check review(s) found:\n" + "\n".join(formatted_reviews)
-            elif ext_check.get("message"):
+            elif ext_check.get("message") and not external_evidence:
                 ext_str = ext_check.get("message")
 
         context_text = f"""---
@@ -195,13 +214,14 @@ CURRENT TRUTHLENS ANALYSIS CONTEXT:
 - Author: {author or 'Not specified'}
 - Publication Date: {pub_date or 'Not specified'}
 - Model Prediction (Linguistic Style): {model_pred}
-- Model Confidence: {confidence}
+- Model Confidence: {conf_display}
 - Overall Verification Status: {verif_status}
-- Verification Summary: {verif_summary}
-- Detected Suspicious Signals / Heuristics: {json.dumps(indicators) if isinstance(indicators, (list, dict)) else str(indicators)}
-- Diagnostic Explanation: {explanation}
+- Final Conclusion: {final_conclusion or 'None specified'}
+- Verification Reason: {verif_reason or verif_summary}
 - External Fact-Check Database Findings:
 {ext_str}
+- Detected Suspicious Signals / Heuristics: {json.dumps(indicators) if isinstance(indicators, (list, dict)) else str(indicators)}
+- Diagnostic Explanation: {explanation}
 - Article Content Sample / Snippet:
 "{article_snippet}"
 ---

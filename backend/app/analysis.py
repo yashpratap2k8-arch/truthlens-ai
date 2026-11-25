@@ -13,6 +13,99 @@ DISCLAIMER = (
     "It cannot confirm whether a claim is true. Always check the claims with trusted sources."
 )
 
+
+def classify_input_type(text: str) -> tuple[str, str]:
+    """
+    Classifies the input into:
+    - 'short_input': extremely short (1-2 words or too brief to form a proposition)
+    - 'question': a factual question or inquiry (e.g. 'is Narendra Modi dead?', 'Did X happen?')
+    - 'article': standard statement, headline, or news article
+    Returns: (input_type, clean_query)
+    """
+    cleaned = (text or "").strip()
+    words = cleaned.split()
+
+    if len(words) < 3 and not (cleaned.endswith("?") and len(words) >= 2):
+        return "short_input", cleaned
+
+    # Check for question marks or interrogative patterns
+    is_q = False
+    if cleaned.endswith("?"):
+        is_q = True
+    elif re.match(r"^(is|are|was|were|did|do|does|has|have|had|will|would|can|could|who|what|where|when|why|how|should|shall)\b", cleaned, re.I):
+        is_q = True
+    elif re.search(r"\b(is\s+it\s+true\s+that|is\s+this\s+(?:news\s+)?true|did\s+.*\s+happen|has\s+.*\s+died|is\s+.*\s+dead|is\s+.*\s+alive|who\s+is\s+the\s+current|did\s+.*\s+announce|was\s+.*\s+arrested)\b", cleaned, re.I):
+        is_q = True
+
+    if is_q:
+        q_clean = re.sub(
+            r"^(is|are|was|were|did|do|does|has|have|had|will|would|can|could|who|what|where|when|why|how)\s+(it\s+true\s+that\s+|this\s+(?:news\s+)?true\s+(?:that\s+)?|the\s+current\s+)?",
+            "",
+            cleaned,
+            flags=re.I,
+        )
+        q_clean = q_clean.rstrip("?").strip()
+        return "question", q_clean or cleaned
+
+    return "article", cleaned
+
+
+def evaluate_fact_checks(matches: list) -> tuple[str, str, str]:
+    """
+    Evaluates matches from fact check databases and maps to standard statuses:
+    - Verified True
+    - Likely True
+    - False / Debunked
+    - Misleading
+    - Partially True
+    - Needs Verification
+    Returns: (status, summary, evidence_strength)
+    evidence_strength: 'Strong' | 'Moderate' | 'Limited' | 'None'
+    """
+    if not matches:
+        return "Needs Verification", "No reliable external evidence was found to determine this claim.", "None"
+
+    all_ratings = []
+    total_reviews = 0
+    for m in matches:
+        reviews = m.get("reviews", [])
+        total_reviews += len(reviews)
+        for r in reviews:
+            if r.get("rating"):
+                all_ratings.append(r["rating"].lower())
+
+    ratings_str = " ".join(all_ratings)
+
+    if total_reviews >= 2:
+        evidence_strength = "Strong"
+    elif total_reviews == 1:
+        evidence_strength = "Moderate"
+    else:
+        evidence_strength = "Limited"
+
+    if any(k in ratings_str for k in ["pants on fire", "false", "fake", "incorrect", "debunk", "hoax", "fabricated"]):
+        status = "False / Debunked"
+        summary = "Available fact-check evidence indicates that this claim is false/debunked."
+    elif any(k in ratings_str for k in ["half true", "half-true", "partially true", "partly true", "mixture", "partially", "partly"]):
+        status = "Partially True"
+        summary = "Independent fact-checkers found the claim to be partially true or containing accurate elements alongside context caveats."
+    elif any(k in ratings_str for k in ["misleading", "missing context", "out of context", "distorted", "exaggerat"]):
+        status = "Misleading"
+        summary = "Independent fact-checkers determined this claim to be misleading, out of context, or exaggerated."
+    elif any(k in ratings_str for k in ["mostly true", "true", "correct", "accurate"]):
+        if any(k in ratings_str for k in ["mostly true"]):
+            status = "Likely True"
+            summary = "Available evidence mostly supports this claim."
+        else:
+            status = "Verified True"
+            summary = "Available evidence supports this claim."
+    else:
+        status = "Needs Verification"
+        summary = "Fact-check entries were located, but their ratings are inconclusive or unrated. Available evidence remains insufficient for a final determination."
+        evidence_strength = "Limited"
+
+    return status, summary, evidence_strength
+
 STYLE_PATTERNS = {
     "sensational": ("Sensational wording", [
         r"shocking", r"bombshell", r"unbelievable", r"jaw[- ]dropping", r"explosive", r"outrageous",
@@ -137,27 +230,108 @@ def build_explanation(pred, flags):
 
 
 def analyze(text: str, title=None) -> dict:
+    input_type, clean_query = classify_input_type(text)
+
+    # 1. Short Input / Insufficient Words
+    if input_type == "short_input":
+        word_count = len((text or "").split())
+        return {
+            "verdict": "Needs Verification",
+            "input_type": "short_input",
+            "clean_query": clean_query,
+            "model_prediction": "Insufficient Context",
+            "model_confidence": 0.0,
+            "confidence_display": "N/A",
+            "confidence": 0.0,
+            "fake_probability": 0.5,
+            "real_probability": 0.5,
+            "verification_status": "Insufficient Context",
+            "verification_reason": "Please provide the complete claim or article for reliable analysis.",
+            "final_conclusion": "Insufficient context provided. Please enter a full claim or complete news article.",
+            "external_evidence": "No reliable external evidence was found.",
+            "evidence_strength": "None",
+            "word_count": word_count,
+            "vocab_coverage": 0.0,
+            "influential_words": [],
+            "suspicious_flags": [],
+            "highlights": [],
+            "explanation": [
+                f"The provided input has only {word_count} word{'s' if word_count != 1 else ''}, which is insufficient for linguistic style analysis.",
+                "Machine-learning classification models evaluate rhetoric and sentence structure, which require complete phrasing.",
+                "Please submit a complete headline, claim statement, or article excerpt.",
+            ],
+            "fact_check_links": [],
+            "text": text,
+            "disclaimer": "Input is insufficient for stylistic or factual analysis. Please submit a full sentence or article.",
+        }
+
+    # 2. Factual Questions
+    if input_type == "question":
+        word_count = len(text.split())
+        return {
+            "verdict": "Needs Verification",
+            "input_type": "question",
+            "clean_query": clean_query,
+            "model_prediction": "Factual Question / Claim",
+            "model_confidence": 0.0,
+            "confidence_display": "N/A (Question)",
+            "confidence": 0.0,
+            "fake_probability": 0.5,
+            "real_probability": 0.5,
+            "verification_status": "Needs Verification",
+            "verification_reason": "No reliable external evidence was found to determine this claim.",
+            "final_conclusion": "TruthLens cannot currently confirm or debunk this claim.",
+            "external_evidence": "No reliable external evidence was found.",
+            "evidence_strength": "None",
+            "word_count": word_count,
+            "vocab_coverage": 0.0,
+            "influential_words": [],
+            "suspicious_flags": [],
+            "highlights": [],
+            "explanation": [
+                "Factual Question / Claim Detected: Questions express inquiries rather than news article writing patterns.",
+                "Linguistic style modeling is not applicable to factual verification.",
+                "Factual verification relies on published fact-check records and primary sources.",
+                "If reliable matching evidence exists, status is determined from that evidence; otherwise, it remains Needs Verification.",
+            ],
+            "fact_check_links": fact_check_links(title or clean_query, text),
+            "text": text,
+            "disclaimer": "Verification is based on available external fact-check evidence, not the ML writing-pattern classifier.",
+        }
+
+    # 3. Standard Article / Text Analysis
     pred = ml.predict(text)
     flags, style_spans = find_style_signals(text, pred["word_count"])
     spans = to_utf16(text, merge_spans(style_spans + influence_spans(text, pred["words"])))
     p = pred["p_fake"]
     conf = round(max(p, 1 - p), 4)
+    conf_display = f"{conf * 100:.1f}%"
     model_prediction = pred.get("model_prediction", pred.get("verdict", "Uncertain"))
 
-    # Verification status: Without independent fact-check proof, status is ALWAYS Needs Verification
     verification_status = "Needs Verification"
-    verification_summary = (
-        f"The ML model predicts '{model_prediction}' with {conf * 100:.1f}% confidence based on text patterns. "
-        "However, model confidence is a measure of linguistic resemblance, NOT proof of truth or falsity. "
-        "Available evidence is insufficient for a final factual determination; the overall status is Needs Verification."
+    verification_reason = (
+        "The ML model analyzes writing patterns and cannot establish whether a real-world claim is true or false. "
+        "No reliable external evidence was found to determine this claim."
     )
+    if model_prediction == "Likely Fake":
+        final_conclusion = "The text exhibits writing patterns common in misleading articles, but cannot be proven true or false without external fact-checking."
+    elif model_prediction == "Likely Real":
+        final_conclusion = "The text exhibits writing patterns common in credible news reporting; verify specific claims with trusted sources."
+    else:
+        final_conclusion = "The text shows mixed linguistic signals, and available evidence is insufficient to determine credibility."
 
     return {
         "verdict": pred["verdict"],
+        "input_type": "article",
+        "clean_query": clean_query,
         "model_prediction": model_prediction,
         "model_confidence": conf,
+        "confidence_display": conf_display,
         "verification_status": verification_status,
-        "verification_summary": verification_summary,
+        "verification_reason": verification_reason,
+        "final_conclusion": final_conclusion,
+        "external_evidence": "No reliable external evidence was found.",
+        "evidence_strength": "None",
         "lean": "fake" if p >= 0.5 else "real",
         "fake_probability": round(p, 4),
         "real_probability": round(1 - p, 4),

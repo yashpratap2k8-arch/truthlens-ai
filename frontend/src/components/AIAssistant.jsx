@@ -20,11 +20,11 @@ import { useAuth } from '../context/AuthContext'
 import { useAI } from '../context/AIContext'
 
 const QUICK_PROMPTS = [
-  'Why was this article marked suspicious?',
+  'Why is this claim suspicious?',
+  'What evidence supports this?',
+  'Is this verified?',
   'Explain this result in simple language',
   'What does Needs Verification mean?',
-  'What does the confidence score mean?',
-  'Is this prediction a verified fact?',
   'How can I verify this news independently?',
 ]
 
@@ -250,9 +250,9 @@ export default function AIAssistant() {
                 <span className="text-slate-700 dark:text-slate-300 truncate">
                   {activeContext.title || 'Attached'}
                 </span>
-                {activeContext.confidence && (
+                {(activeContext.confidence_display || activeContext.confidence) && (
                   <span className="ml-1 text-[11px] text-slate-500 font-mono">
-                    ({activeContext.confidence})
+                    ({activeContext.confidence_display || activeContext.confidence})
                   </span>
                 )}
                 {activeContext.verification_status && (

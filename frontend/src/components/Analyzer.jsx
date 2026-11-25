@@ -92,19 +92,28 @@ export default function Analyzer() {
     setLoading(true)
     call()
       .then(setResult)
-      .catch((err) => setError(err.message))
+      .catch((err) => {
+        let msg = err.message || 'Analysis service is temporarily unavailable. Please try again.'
+        if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.toLowerCase().includes('connection')) {
+          msg = 'Unable to reach the TruthLens analysis server. Please verify the backend service is running and try again.'
+        } else if (msg.includes('422')) {
+          msg = 'Unable to extract readable news content from the provided input. Please check the URL or text format.'
+        } else if (msg.includes('503')) {
+          msg = 'The verification engine is currently preparing model weights. Please try again in a few moments.'
+        }
+        setError(msg)
+      })
       .finally(() => setLoading(false))
   }
 
   const steps = [
     ...(mode === 'url' ? ['Validating URL & applying security checks…', 'Extracting article body paragraphs & metadata…'] : []),
     ...(mode === 'file' ? ['Reading uploaded text buffer & decoding content…'] : []),
-    'Sanitizing text & stripping publisher tags…',
-    'Generating sublinear TF-IDF n-gram vectors…',
-    'Running calibrated Logistic Regression model…',
-    'Detecting rhetoric heuristics & style signals…',
-    'Querying external fact-check databases…',
-    'Synthesizing diagnostic credibility report…',
+    'Analyzing claim & evaluating statement structure…',
+    'Checking available evidence across verified databases…',
+    'Comparing fact-check results & rating sources…',
+    'Preparing verification & style metrics…',
+    'Generating credibility & verification report…',
   ]
 
   return (
@@ -307,12 +316,26 @@ export default function Analyzer() {
 
         {/* Error message */}
         {error && (
-          <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3.5 text-xs sm:text-sm text-rose-700 dark:text-rose-300 animate-fade-up" role="alert">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-500" />
-            <div className="flex-1 font-medium">{error}</div>
-            <button type="button" onClick={() => setError('')} className="text-rose-500 hover:text-rose-700">
-              <X className="h-4 w-4" />
-            </button>
+          <div className="mt-4 flex items-start justify-between gap-3 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-xs sm:text-sm text-rose-700 dark:text-rose-300 animate-fade-up" role="alert">
+            <div className="flex items-start gap-2.5 flex-1 min-w-0">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-500" />
+              <div>
+                <p className="font-bold text-rose-900 dark:text-rose-200">Unable to Complete Analysis</p>
+                <p className="mt-0.5 leading-relaxed">{error}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={submit}
+                className="rounded-lg bg-rose-500/20 px-2.5 py-1 text-xs font-semibold text-rose-700 dark:text-rose-200 hover:bg-rose-500/30 transition"
+              >
+                Retry
+              </button>
+              <button type="button" onClick={() => setError('')} className="text-rose-500 hover:text-rose-700 p-1" aria-label="Dismiss error">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         )}
 

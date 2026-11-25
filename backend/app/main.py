@@ -1,5 +1,6 @@
 """FastAPI application: REST endpoints for analysis, history, statistics."""
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -17,7 +18,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from . import analysis, auth, database as db, ml, ai_agent
+from . import analysis, auth, database as db, ml, ai_agent, ai_provider, gemini_agent, evidence_retriever
 from .extractor import ExtractionError, extract_article
 
 log = logging.getLogger("analyzer")
@@ -39,7 +40,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AI Fake News Analyzer", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -72,6 +73,20 @@ class GoogleAuthRequest(BaseModel):
 
 
 class AIChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+    context: Optional[dict] = None
+
+
+class ClaimVerificationRequest(BaseModel):
+    claim: str = Field(..., min_length=2, max_length=1000)
+    context: Optional[dict] = None
+
+
+class EvidenceRequest(BaseModel):
+    query: str = Field(..., min_length=2, max_length=500)
+
+
+class GeminiChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
     context: Optional[dict] = None
 
@@ -161,8 +176,6 @@ def run_analysis(text, source_type, source_ref=None, title=None, user_id=None, e
     text = (text or "").strip()
     if not text:
         raise HTTPException(400, "Please provide some text to analyze.")
-    if len(text.split()) < 3:
-        raise HTTPException(422, "Please provide at least a few words (a headline or an article).")
     truncated = len(text) > MAX_CHARS
     text = text[:MAX_CHARS]
 
@@ -185,26 +198,143 @@ def run_analysis(text, source_type, source_ref=None, title=None, user_id=None, e
     else:
         source_domain = "Direct Text Input"
 
-    # Search external published fact-checks
-    fact_check = search_google_fact_checks(text, effective_title)
+    # Search external published fact-checks based on input type
+    input_type = result.get("input_type", "article")
 
-    # Verification status logic:
-    # "Needs Verification" MUST NOT automatically mean Fake or Proven misinformation.
-    # It means available evidence is not sufficient for a reliable final factual conclusion.
-    if fact_check.get("matches"):
-        verification_status = "Needs Verification (Fact-Checks Matched)"
-        verification_summary = (
-            f"Model predicts '{result['model_prediction']}' with {result['confidence']*100:.1f}% confidence. "
-            f"External fact-check database matched {len(fact_check['matches'])} related claim review(s). "
-            "Examine external reviews below for independent journalistic findings."
-        )
+    if input_type == "short_input":
+        fact_check = {
+            "status": "skipped",
+            "matches": [],
+            "message": "Input is too brief for fact-checking. Please provide more context.",
+        }
+        verification_status = "Insufficient Context"
+        verification_summary = "Please provide the complete claim or article for reliable analysis."
+        result["verification_status"] = verification_status
+        result["verification_reason"] = verification_summary
+        result["verification_summary"] = verification_summary
+        result["final_conclusion"] = "Insufficient context provided. Please enter a full claim or complete news article."
+        result["external_evidence"] = "No reliable external evidence was found."
+        result["evidence_strength"] = "None"
+        result["disclaimer"] = "Input is insufficient for stylistic or factual analysis. Please submit a full sentence or article."
+        result["verification_notice"] = "Input is too brief for stylistic or factual analysis."
+    elif input_type == "question":
+        clean_q = result.get("clean_query") or effective_title
+        fact_check = search_google_fact_checks(text, title=clean_q)
+        matches = fact_check.get("matches", [])
+        if matches:
+            v_status, v_reason, ev_strength = analysis.evaluate_fact_checks(matches)
+            result["verification_status"] = v_status
+            result["verification_reason"] = v_reason
+            result["evidence_strength"] = ev_strength
+            result["external_evidence"] = f"{len(matches)} matching fact-check report{'s' if len(matches) != 1 else ''}"
+            result["final_conclusion"] = v_reason
+            result["disclaimer"] = "Verification is based on available external fact-check evidence, not the ML writing-pattern classifier."
+            result["verification_notice"] = "TruthLens found matching external fact-check evidence relevant to this claim."
+            verification_summary = f"Factual question inquiry matched {len(matches)} fact-check report(s) (Status: {v_status})."
+        else:
+            result["verification_status"] = "Needs Verification"
+            result["verification_reason"] = "No reliable external evidence was found to determine this claim."
+            result["final_conclusion"] = "TruthLens cannot currently confirm or debunk this claim."
+            result["external_evidence"] = "No reliable external evidence was found."
+            result["evidence_strength"] = "None"
+            result["disclaimer"] = "Verification is based on available external fact-check evidence, not the ML writing-pattern classifier."
+            result["verification_notice"] = "TruthLens could not find sufficient reliable external evidence to determine this claim."
+            verification_summary = "Factual question inquiry: No matching external fact-checks were identified; status remains Needs Verification."
+        result["verification_summary"] = verification_summary
     else:
-        verification_status = "Needs Verification"
-        verification_summary = (
-            f"Model predicts '{result['model_prediction']}' with {result['confidence']*100:.1f}% confidence. "
-            "However, model confidence measures linguistic style resemblance to training articles, NOT proof of truth or falsity. "
-            "No matching external fact-checks were identified; the overall status remains Needs Verification."
-        )
+        search_q = result.get("clean_query") or effective_title
+        fact_check = search_google_fact_checks(text, title=search_q)
+        matches = fact_check.get("matches", [])
+        if matches:
+            v_status, v_reason, ev_strength = analysis.evaluate_fact_checks(matches)
+            result["verification_status"] = v_status
+            result["verification_reason"] = v_reason
+            result["evidence_strength"] = ev_strength
+            result["external_evidence"] = f"{len(matches)} matching fact-check report{'s' if len(matches) != 1 else ''}"
+            result["final_conclusion"] = v_reason
+            result["verification_notice"] = f"TruthLens found {len(matches)} matching external fact-check report(s) addressing this claim."
+            verification_summary = (
+                f"Model predicts '{result['model_prediction']}' with {result['confidence_display']} confidence. "
+                f"External fact-check database matched {len(matches)} related claim review(s) (Status: {v_status}). "
+                "Independent fact-checker findings take precedence over stylistic pattern estimates."
+            )
+        else:
+            result["verification_status"] = "Needs Verification"
+            result["verification_reason"] = (
+                "The ML model analyzes writing patterns and cannot establish whether a real-world claim is true or false. "
+                "No reliable external evidence was found to determine this claim."
+            )
+            result["external_evidence"] = "No reliable external evidence was found."
+            result["evidence_strength"] = "None"
+            result["verification_notice"] = (
+                f"Model predicts '{result['model_prediction']}' with {result['confidence_display']} confidence. "
+                "However, model confidence measures linguistic style resemblance to training articles, NOT proof of truth or falsity. "
+                "No matching external fact-checks were identified; the overall status remains Needs Verification."
+            )
+            verification_summary = result["verification_notice"]
+        result["verification_summary"] = verification_summary
+
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    # Multi-source authoritative evidence retrieval and Gemini reasoning
+    evidence_items = []
+    ai_assessment = ""
+    missing_evidence_note = ""
+    provenance_list = ["ML Writing Pattern Analysis"]
+
+    if input_type != "short_input":
+        search_target = result.get("clean_query") or effective_title
+        evidence_items = evidence_retriever.retrieve_comprehensive_evidence(search_target, text, title=effective_title)
+        
+        # If external fact check had matches, ensure they are represented in evidence_items
+        for m in fact_check.get("matches", []):
+            for r in m.get("reviews", []):
+                rev_url = r.get("url") or ""
+                if rev_url and not any(it.get("source_url") == rev_url for it in evidence_items):
+                    evidence_items.append({
+                        "source_name": r.get("publisher") or "Independent Fact-Checker",
+                        "source_url": rev_url,
+                        "source_type": "fact_checker",
+                        "snippet": f'Claim: "{m.get("claim", "")}" — Rating: {r.get("rating", "Unrated")}',
+                        "rating": r.get("rating", "Unrated"),
+                        "relevance": "High",
+                        "evidence_strength": "Strong",
+                        "provenance": "Google Fact Check API",
+                        "retrieved_at": now_iso,
+                    })
+
+        # Gemini Agent Reasoning Layer (Backend-only)
+        if gemini_agent.is_gemini_available():
+            try:
+                g_eval = gemini_agent.evaluate_claim_with_gemini(
+                    claim_text=search_target,
+                    article_text=text,
+                    title=effective_title,
+                    source_domain=source_domain,
+                    ml_prediction=result.get("model_prediction"),
+                    ml_confidence=result.get("confidence_display"),
+                    external_evidence=result.get("external_evidence"),
+                    evidence_items=evidence_items,
+                    fact_check_results=fact_check,
+                )
+                ai_assessment = g_eval.get("ai_assessment", "")
+                missing_evidence_note = g_eval.get("missing_evidence_note", "")
+                
+                # Merge any web search grounding sources returned by Gemini
+                for gs in g_eval.get("grounding_sources", []):
+                    if gs.get("source_url") and not any(it.get("source_url") == gs.get("source_url") for it in evidence_items):
+                        evidence_items.append(gs)
+
+                if g_eval.get("provider") == "gemini":
+                    provenance_list.append("Gemini Grounded Reasoning")
+            except Exception as e:
+                log.warning(f"Gemini claim evaluation exception: {e}")
+
+    # Build provenance list
+    for it in evidence_items:
+        p = it.get("provenance")
+        if p and p not in provenance_list:
+            provenance_list.append(p)
 
     result.update(
         source_type=source_type,
@@ -213,8 +343,13 @@ def run_analysis(text, source_type, source_ref=None, title=None, user_id=None, e
         title=effective_title,
         truncated=truncated,
         external_fact_check=fact_check,
-        verification_status=verification_status,
-        verification_summary=verification_summary,
+        evidence_items=evidence_items,
+        ai_assessment=ai_assessment,
+        missing_evidence_note=missing_evidence_note,
+        evidence_provenance=provenance_list,
+        verification_status=result["verification_status"],
+        verification_summary=result["verification_summary"],
+        last_verified=now_iso,
         author=(extra_meta.get("author") if extra_meta else None),
         publication_date=(extra_meta.get("publication_date") if extra_meta else None),
         image_url=(extra_meta.get("image_url") if extra_meta else None),
@@ -364,6 +499,76 @@ def clear_history(user: Optional[dict] = Depends(auth.get_optional_user)):
 @app.get("/api/stats")
 def stats():
     return db.stats()
+
+
+# ---- Verification & Evidence endpoints -----------------------------------
+@app.post("/api/verification/claim")
+async def verify_claim(req: ClaimVerificationRequest, user: Optional[dict] = Depends(auth.get_optional_user)):
+    """Directly verifies a factual claim against authoritative evidence and Gemini reasoning."""
+    search_target = req.claim.strip()
+    evidence_items = await run_in_threadpool(evidence_retriever.retrieve_comprehensive_evidence, search_target, search_target)
+    
+    # Evaluate with Gemini if available
+    gemini_res = await run_in_threadpool(
+        gemini_agent.evaluate_claim_with_gemini,
+        claim_text=search_target,
+        evidence_items=evidence_items,
+    )
+    
+    provenance = ["authoritative_source_retrieval"]
+    if gemini_res.get("provider") == "gemini":
+        provenance.append("Gemini web grounding")
+    
+    return {
+        "claim": search_target,
+        "verification_status": gemini_res.get("verification_status", "Needs Verification"),
+        "evidence_strength": gemini_res.get("evidence_strength", "Limited" if evidence_items else "None"),
+        "ai_assessment": gemini_res.get("ai_assessment", ""),
+        "final_conclusion": gemini_res.get("final_conclusion", "TruthLens cannot currently confirm or debunk this claim."),
+        "missing_evidence_note": gemini_res.get("missing_evidence_note", ""),
+        "evidence_items": evidence_items,
+        "evidence_provenance": provenance,
+    }
+
+
+@app.post("/api/verification/evidence")
+async def search_evidence(req: EvidenceRequest):
+    """Retrieves authoritative evidence records for a search query without full ML analysis."""
+    items = await run_in_threadpool(evidence_retriever.retrieve_comprehensive_evidence, req.query, req.query)
+    return {
+        "query": req.query,
+        "total_sources": len(items),
+        "evidence_items": items,
+    }
+
+
+@app.post("/api/ai/gemini")
+async def ai_gemini_direct(req: GeminiChatRequest):
+    """Direct Gemini assistant endpoint."""
+    res = await run_in_threadpool(gemini_agent.chat_with_gemini, req.message, req.context)
+    if not res.get("success"):
+        return JSONResponse(status_code=503, content=res)
+    return res
+
+
+@app.get("/api/verification/{analysis_id}")
+def get_verification_details(analysis_id: int, user: Optional[dict] = Depends(auth.get_optional_user)):
+    """Retrieves evidence and verification breakdown for a previously analyzed item."""
+    user_id = user["id"] if user else None
+    item = db.get_analysis(analysis_id, user_id=user_id)
+    if not item:
+        raise HTTPException(404, "Analysis record not found.")
+    return {
+        "analysis_id": analysis_id,
+        "title": item.get("title"),
+        "verification_status": item.get("verification_status"),
+        "evidence_strength": item.get("evidence_strength"),
+        "final_conclusion": item.get("final_conclusion"),
+        "ai_assessment": item.get("ai_assessment"),
+        "evidence_items": item.get("evidence_items", []),
+        "evidence_provenance": item.get("evidence_provenance", []),
+        "last_verified": item.get("last_verified"),
+    }
 
 
 # ---- Model / health -------------------------------------------------------

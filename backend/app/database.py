@@ -104,7 +104,7 @@ def get_user_by_id(user_id: int):
 
 
 def save_analysis(result: dict, snippet: str, user_id=None):
-    """Insert a result and return (id, created_at)."""
+    """Insert a result and return (id, created_at). Synchronizes with Supabase if configured."""
     created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with get_conn() as c:
         cur = c.execute(
@@ -124,7 +124,19 @@ def save_analysis(result: dict, snippet: str, user_id=None):
                 user_id,
             ),
         )
-        return cur.lastrowid, created_at
+        local_id = cur.lastrowid
+
+    # Asynchronously attempt cloud persistence to Supabase
+    try:
+        from . import supabase_client
+        if supabase_client.client.is_configured:
+            cloud_id = supabase_client.client.save_analysis(result, snippet, user_id=str(user_id) if user_id else None)
+            if cloud_id:
+                result["cloud_id"] = cloud_id
+    except Exception:
+        pass
+
+    return local_id, created_at
 
 
 def list_history(limit=10, offset=0, verdict=None, user_id=None):
