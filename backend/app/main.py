@@ -40,7 +40,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AI Fake News Analyzer", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://truthlens-ai-gamma-two.vercel.app",
+        "https://truthlens-ai.vercel.app",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+    ],
+    allow_origin_regex=r"^https:\/\/truthlens-ai.*\.vercel\.app$",
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

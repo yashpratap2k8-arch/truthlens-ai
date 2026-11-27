@@ -5,6 +5,10 @@ __pycache__/
 venv/
 .venv/
 backend/analyzer.db
+analyzer.db
+*.db
+*.sqlite
+*.sqlite3
 backend/data/*.csv
 .env
 venv/

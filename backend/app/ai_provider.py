@@ -61,7 +61,13 @@ class GeminiProvider(AIProvider):
 
     @property
     def is_configured(self) -> bool:
-        return bool(self.api_key)
+        if not self.api_key:
+            return False
+        # Do not treat Google Fact Check API key as a valid Gemini API key
+        fact_check_key = (os.getenv("GOOGLE_FACT_CHECK_API_KEY") or "").strip()
+        if fact_check_key and self.api_key == fact_check_key:
+            return False
+        return True
 
     def _call_generate_content(self, system_instruction: str, prompt: str, enable_search: bool = False) -> Dict[str, Any]:
         """Calls Gemini generateContent endpoint via HTTPS REST."""

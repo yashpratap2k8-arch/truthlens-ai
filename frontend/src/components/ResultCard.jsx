@@ -420,7 +420,7 @@ export default function ResultCard({ result }) {
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1.5 font-bold text-violet-600 hover:text-violet-400 transition-colors"
                       >
-                        <span>Open Source</span>
+                        <span>View Original Source</span>
                         <ExternalLink className="h-3 w-3" />
                       </a>
                     )}
@@ -1000,7 +1000,7 @@ export default function ResultCard({ result }) {
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 font-bold text-violet-600 hover:text-violet-400 underline"
                     >
-                      Open Source <ExternalLink className="h-3 w-3" />
+                      View Original Source <ExternalLink className="h-3 w-3" />
                     </a>
                   )}
                 </div>
